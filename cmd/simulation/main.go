@@ -27,24 +27,32 @@ func main() {
 	registerPerClient := flag.Int("registerPerClient", 5, "register per client")
 	subscribePerClient := flag.Int("subscribePerClient", 5, "subscribe per client")
 	stableDuration := flag.Int("stableDuration", 1200, "stable duration seconds")
+	churnDuration := flag.Int("churnDuration", 1200, "churn duration seconds")
 	churnRatio := flag.Float64("churnRatio", 0.15, "churn ratio")
 	churnInterval := flag.Int("churnInterval", 10, "churn interval seconds")
+	debug := flag.Bool("debug", false, "enable debug logging")
+	configListenPerClient := flag.Int("configListenPerClient", 0, "config listen per client")
 
 	flag.Parse()
 
 	if *perfMode == "simulation" {
 		simConfig := bench_new.SimulationConfig{
-			NacosAddr:          *nacosServerAddr,
-			MachineId:          *machineId,
-			ClientCount:        *nacosClientCount,
-			ServiceCount:       *serviceCount,
-			RegisterPerClient:  *registerPerClient,
-			SubscribePerClient: *subscribePerClient,
-			StableDuration:     *stableDuration,
-			ChurnRatio:         *churnRatio,
-			ChurnInterval:      *churnInterval,
-			PerfApi:            *perfApi,
-			MetadataLength:     *namingMetadataLength,
+			NacosAddr:             *nacosServerAddr,
+			MachineId:             *machineId,
+			ClientCount:           *nacosClientCount,
+			ServiceCount:          *serviceCount,
+			RegisterPerClient:     *registerPerClient,
+			SubscribePerClient:    *subscribePerClient,
+			StableDuration:        *stableDuration,
+			ChurnDuration:         *churnDuration,
+			ChurnRatio:            *churnRatio,
+			ChurnInterval:         *churnInterval,
+			PerfApi:               *perfApi,
+			MetadataLength:        *namingMetadataLength,
+			Debug:                 *debug,
+			ConfigCount:           *configCount,
+			ConfigContentLength:   *configContentLength,
+			ConfigListenPerClient: *configListenPerClient,
 		}
 		bench_new.RunSimulation(simConfig)
 		return

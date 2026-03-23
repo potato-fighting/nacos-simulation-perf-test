@@ -6,7 +6,7 @@
 
 ```bash
 cd nacos-bench
-go build -o nacos-bench cmd/main/main_new.go
+go build -o nacos-bench-sim cmd/simulation/main.go
 ```
 
 ### 2. 场景1：大规模服务注册后达到稳定状态
@@ -38,10 +38,14 @@ go build -o nacos-bench cmd/main/main_new.go
   --serviceCount=100000 \
   --registerPerClient=5 \
   --subscribePerClient=5 \
-  --stableDuration=1200 \
+  --stableDuration=300 \
+  --churnDuration=1200 \
   --churnRatio=0.15 \
   --churnInterval=10 \
   --namingMetadataLength=128 \
+  --configCount=1000 \
+  --configContentLength=128 \
+  --configListenPerClient=5 \
   --machineId=1
 ```
 
@@ -55,12 +59,17 @@ go build -o nacos-bench cmd/main/main_new.go
 | machineId | 机器编号（1-200） | 1 | ✓ | ✓ |
 | nacosClientCount | 每台机器的客户端数 | 1000 | 500 | 500 |
 | serviceCount | 全局服务总数 | 15000 | 100000 | 100000 |
-| registerPerClient | 每个客户端注册的服务数 | 3 | 5 | 5 |
+| registerPerClient | 每个客户端注册的实例数 | 3 | 5 | 5 |
 | subscribePerClient | 每个客户端订阅的服务数 | 3 | 5 | 5 |
-| stableDuration | 稳定状态持续时间（秒） | 1200 | 1200 | 1200 |
+| stableDuration | 稳定状态持续时间（秒） | 1200 | 1200 | 300 |
+| churnDuration | 变更阶段持续时间（秒） | 1200 | - | 1200 |
 | churnRatio | 变更实例比例（0.1-0.2） | 0.15 | - | 0.15 |
 | churnInterval | 变更间隔（秒） | 10 | - | 10 |
 | namingMetadataLength | 元数据长度 | 128 | 128 | 128 |
+| configCount | 配置数量（0表示不启用） | 0 | 可选 | 可选 |
+| configContentLength | 配置内容长度 | 128 | 可选 | 可选 |
+| configListenPerClient | 每个客户端监听的配置数 | 0 | 可选 | 可选 |
+| debug | 启用详细日志（订阅和推送） | false | 可选 | 可选 |
 
 ## 测试流程
 
@@ -73,10 +82,10 @@ go build -o nacos-bench cmd/main/main_new.go
 
 ### 场景2执行流程
 
-1. **初始化阶段**：创建500个客户端
-2. **注册阶段**：每个客户端注册5个服务实例，订阅5个服务
-3. **稳定阶段**：保持20分钟，观察推送和性能
-4. **变更阶段**：15%的客户端每10秒变更一次实例，持续20分钟
+1. **初始化阶段**：创建500个客户端，创建配置（如果启用）
+2. **注册阶段**：每个客户端注册5个服务实例，订阅5个服务，监听配置（如果启用）
+3. **稳定阶段**：保持5分钟，观察推送和性能
+4. **变更阶段**：15%的客户端每10秒变更一次实例和配置，持续20分钟
 5. **关闭阶段**：按 Ctrl+C 触发，注销所有实例
 
 ## 输出示例

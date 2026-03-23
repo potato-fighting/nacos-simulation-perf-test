@@ -7,7 +7,7 @@
 **测试规模：**
 - 200台施压机
 - 每台500个线程（模拟500个客户端）
-- 总计：10万个客户端、10万个服务、50万个服务实例
+- 总计：10万个客户端、10万个服务、50万个服务实例（每个服务5个实例）
 
 ---
 
@@ -16,8 +16,8 @@
 ### 场景1：大规模服务注册后达到稳定状态
 
 **测试流程：**
-1. 所有客户端并发注册服务（每个客户端注册5个服务实例）
-2. 所有客户端订阅服务（每个客户端订阅5个服务）
+1. 所有客户端并发注册服务（每个客户端对应1个服务，注册5个实例）
+2. 所有客户端订阅服务（每个客户端订阅5个本进程内的其他服务）
 3. 达到稳定状态后持续观察20分钟
 4. 关闭所有施压机，观察注销性能
 
@@ -27,18 +27,21 @@
 - 稳定状态下的服务端性能指标
 - 注销过程中的服务端性能指标
 
-### 场景2：稳定状态后部分实例频繁发布
+### 场景2：稳定状态后部分实例频繁发布（含配置变更）
 
 **测试流程：**
 1. 执行场景1的步骤1-3
 2. 稳定状态后，选择10%-20%的实例进行周期性变更
 3. 每隔10秒进行一次变更（注销后重新注册）
-4. 持续观察20分钟
+4. 同时进行配置发布变更（如果启用配置测试）
+5. 持续观察20分钟（由churnDuration参数控制）
 
 **观察指标：**
 - 变更过程中的推送性能
 - 服务端处理变更的性能指标
 - 未变更实例的稳定性
+- 配置推送性能（如果启用）
+- 服务注册与配置管理并存时的系统表现
 
 ---
 
@@ -75,23 +78,80 @@
 
 ### 3. 线程服务分配策略
 
-**每个线程注册5个服务实例：**
+**每个线程对应1个服务，注册5个实例：**
 ```
-计算公式：
-  serviceIndex = threadId * 5 + instanceOffset
-  其中 instanceOffset ∈ [0, 4]
+服务命名：
+  线程0 -> 服务: nacos.sim.svc.{machineId}.0
+  线程1 -> 服务: nacos.sim.svc.{machineId}.1
+  线程499 -> 服务: nacos.sim.svc.{machineId}.499
+
+实例命名（每个服务5个实例）：
+  服务 svc.{machineId}.0 的5个实例:
+    - IP=10.0.1.0, Port=8080
+    - IP=10.0.1.0, Port=8081
+    - IP=10.0.1.0, Port=8082
+    - IP=10.0.1.0, Port=8083
+    - IP=10.0.1.0, Port=8084
+```
+
+**每个线程订阅5个本进程内的服务：**
+```
+- 从本进程的服务池（500个服务）中随机选择5个不同的服务
+- 使用 threadId 作为随机种子，保证可重现
+- 确保订阅的服务一定存在（都是本进程注册的服务）
+- 不订阅自己的服务
+
+示例（假设进程有500个线程）：
+  线程0 -> 订阅: svc.{machineId}.123, svc.{machineId}.456, svc.{machineId}.78, svc.{machineId}.234, svc.{machineId}.345
+  线程1 -> 订阅: svc.{machineId}.89, svc.{machineId}.234, svc.{machineId}.456, svc.{machineId}.12, svc.{machineId}.367
+```
+
+### 4. 配置命名和监听策略
+
+**配置命名规则：**
+```
+配置总数：由 configCount 参数指定（例如1000个）
+配置名格式：nacos.sim.config.{machineId}.{configIndex}
+配置分组：DEFAULT_GROUP
 
 示例：
-  线程0 -> 注册服务: svc.{machineId}.0, svc.{machineId}.1, svc.{machineId}.2, svc.{machineId}.3, svc.{machineId}.4
-  线程1 -> 注册服务: svc.{machineId}.5, svc.{machineId}.6, svc.{machineId}.7, svc.{machineId}.8, svc.{machineId}.9
-  线程499 -> 注册服务: svc.{machineId}.2495, svc.{machineId}.2496, svc.{machineId}.2497, svc.{machineId}.2498, svc.{machineId}.2499
+  机器1: nacos.sim.config.1.0 ~ nacos.sim.config.1.999
+  机器2: nacos.sim.config.2.0 ~ nacos.sim.config.2.999
+  ...
+  机器200: nacos.sim.config.200.0 ~ nacos.sim.config.200.999
 ```
 
-**每个线程订阅5个随机服务：**
+**配置初始化：**
 ```
-- 从全局服务池（10万个服务）中随机选择5个
-- 使用 (machineId * 1000 + threadId) 作为随机种子，保证可重现
-- 订阅的服务可能来自任意机器
+- 在客户端创建完成后，由第一个客户端统一创建所有配置
+- 配置内容：由 configContentLength 参数指定长度的字符串
+- 配置内容格式：重复字符'x'填充到指定长度
+```
+
+**每个线程监听配置策略：**
+```
+监听数量：由 configListenPerClient 参数指定（例如5个）
+选择规则：
+  - 从本机器的配置池中随机选择指定数量的配置
+  - 使用 clientId 作为随机种子，保证可重现
+  - 确保不重复监听同一个配置
+
+示例（假设 configCount=1000, configListenPerClient=5）：
+  客户端0 -> 监听: config.{machineId}.123, config.{machineId}.456, config.{machineId}.78, config.{machineId}.234, config.{machineId}.345
+  客户端1 -> 监听: config.{machineId}.89, config.{machineId}.234, config.{machineId}.456, config.{machineId}.12, config.{machineId}.367
+```
+
+**配置变更策略（场景2）：**
+```
+变更时机：在 churn 阶段，每次服务实例变更时同时进行配置变更
+变更方式：
+  1. 随机选择一个配置（使用 clientId 作为随机种子）
+  2. 发布新内容（原内容 + 时间戳后缀）
+  3. 触发所有监听该配置的客户端收到推送
+
+示例：
+  原配置内容: "xxxx...xxxx"
+  变更后内容: "xxxx...xxxx.1234567890"
 ```
 
 ---
@@ -112,6 +172,9 @@
 
 **稳态持续时间：**
 - 由参数 `--stableDuration` 控制（默认1200秒，即20分钟）
+
+**变更阶段持续时间：**
+- 由参数 `--churnDuration` 控制（默认1200秒，即20分钟）
 
 ### 2. 变更实例选择策略（场景2）
 
@@ -147,17 +210,19 @@
 **阶段1：Registering（注册阶段）**
 ```
 1. 创建500个客户端（goroutine）
-2. 每个客户端并发执行：
+2. 如果启用配置测试，创建指定数量的配置
+3. 每个客户端并发执行：
    - 注册5个服务实例
    - 订阅5个随机服务
-3. 使用 WaitGroup 等待所有客户端完成
-4. 输出统计：注册成功/失败数、耗时
+   - 监听指定数量的配置（如果启用）
+4. 使用 WaitGroup 等待所有客户端完成
+5. 输出统计：注册成功/失败数、订阅成功/失败数、配置监听成功/失败数、耗时
 ```
 
 **阶段2：Stable（稳定阶段）**
 ```
 1. 所有实例保持注册状态
-2. 持续监听订阅的服务变更
+2. 持续监听订阅的服务变更和配置变更
 3. 定期输出统计信息（每30秒）
 4. 持续时间：stableDuration
 ```
@@ -165,16 +230,19 @@
 **阶段3：Churning（变更阶段，仅场景2）**
 ```
 1. 识别需要变更的线程（基于 churnRatio）
-2. 变更线程每隔 churnInterval 秒执行变更操作
+2. 变更线程每隔 churnInterval 秒执行变更操作：
+   - 注销服务实例
+   - 重新注册服务实例
+   - 发布配置变更（如果启用）
 3. 非变更线程保持稳定
-4. 持续时间：stableDuration
+4. 持续时间：churnDuration
 ```
 
 **阶段4：Shutdown（关闭阶段）**
 ```
 1. 所有客户端注销所有实例
 2. 观察服务端注销性能
-3. 输出最终统计信息
+3. 输出最终统计信息（包括配置相关统计）
 4. 程序退出
 ```
 
@@ -221,9 +289,13 @@
   --serviceCount=100000 \
   --registerPerClient=5 \
   --subscribePerClient=5 \
-  --stableDuration=1200 \
+  --stableDuration=300 \
+  --churnDuration=1200 \
   --churnRatio=0.15 \
   --churnInterval=10 \
+  --configCount=1000 \
+  --configContentLength=128 \
+  --configListenPerClient=5 \
   --machineId=1
 ```
 
@@ -231,6 +303,9 @@
 - `perfApi`: `largeScaleWithChurn` 表示场景2
 - `churnRatio`: 变更实例比例（0.1-0.2，默认0.15）
 - `churnInterval`: 变更间隔秒数（默认10）
+- `configCount`: 配置数量（默认0，设置为1000启用配置测试）
+- `configContentLength`: 配置内容长度（默认128）
+- `configListenPerClient`: 每个客户端监听的配置数（默认0，设置为5表示每个客户端监听5个配置）
 
 ---
 
